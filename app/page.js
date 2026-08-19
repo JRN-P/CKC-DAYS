@@ -127,6 +127,7 @@ function PickUserScreen({ employees, onPick, onSettings }) {
 function HomeScreen({ me, employees, requests, balances: balanceRows, onOpenRecord, onNewLeave, onSwitchUser, onSettings }) {
   const myRequests = requests.filter((r) => r.employeeId === me.id).sort((a, b) => b.createdAt - a.createdAt);
   const pendingForMe = requests.filter((r) => r.status === "pending" && (r.approverId === me.id || (me.role === "admin" && !r.approverId))).sort((a, b) => b.createdAt - a.createdAt);
+  const teamRequests = requests.filter((r) => r.approverId === me.id && r.employeeId !== me.id).sort((a, b) => b.createdAt - a.createdAt);
   const balanceIcon = { sick: Heart, personal: Briefcase, vacation: Umbrella, study: Calendar };
   const balances = MAIN_BALANCE_TYPES.map((typeId) => {
     const allocated = (balanceRows.find((b) => b.employee_id === me.id && b.leave_type === typeId) || {}).allocated;
@@ -180,6 +181,21 @@ function HomeScreen({ me, employees, requests, balances: balanceRows, onOpenReco
               <StatusPill status={r.status} /></button>);
           })}
         </div>
+
+        {teamRequests.length > 0 && (
+          <div className="pb-3">
+            <div className="flex items-center justify-between pt-2 pb-2"><span className="text-[13px] font-semibold" style={{ color: NAVY }}>รายการทีมงาน</span></div>
+            <div className="space-y-2.5">
+              {teamRequests.map((r) => {
+                const emp = employees.find((e) => e.id === r.employeeId); const meta = typeMeta(r.typeId); const Icon = meta.icon;
+                return (<button key={r.id} onClick={() => onOpenRecord(r)} className="w-full flex items-center gap-3 bg-white rounded-2xl p-3 text-left">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: meta.bg }}><Icon size={18} color={meta.fg} /></div>
+                  <div className="flex-1 min-w-0"><div className="text-[13px] font-medium" style={{ color: NAVY }}>{r.label} — {emp?.name || "-"}</div><div className="text-[11px] truncate" style={{ color: "#9B9689" }}>วันที่ {r.date}</div></div>
+                  <StatusPill status={r.status} /></button>);
+              })}
+            </div>
+          </div>
+        )}
       </div>
       <div className="px-5 pb-5 pt-2 shrink-0"><button onClick={onNewLeave} className="w-full py-3 rounded-2xl text-white text-[13px] font-medium flex items-center justify-center gap-2" style={{ background: NAVY }}><Plus size={16} /> บันทึกการลา</button></div>
     </div>
@@ -231,14 +247,14 @@ function NewLeaveFlow({ me, employees, onCancel, onSubmit }) {
                   ))}
                 </div>
               </Field>
-            )}
-            <Field label="วันที่คาดว่าจะกลับมาทำงาน"><input type="date" className={inputCls} style={{ color: NAVY }} value={form.returnDate} onChange={(e) => setForm({ ...form, returnDate: e.target.value })} /></Field>
+            )}            <Field label="วันที่คาดว่าจะกลับมาทำงาน"><input type="date" className={inputCls} style={{ color: NAVY }} value={form.returnDate} onChange={(e) => setForm({ ...form, returnDate: e.target.value })} /></Field>
             <Field label="เหตุผล"><textarea rows={3} className={inputCls + " resize-none"} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></Field>
           </div>
         )}
         {step === 3 && (
           <div className="px-5">
-            <p className="text-[12px] mb-3" style={{ color: "#8B8578" }}>แนบเอกสารประกอบ (ถ้ามี)</p>            <button onClick={() => setForm({ ...form, file: form.file ? null : "เอกสารแนบ.pdf" })} className="w-full border-2 border-dashed rounded-2xl py-8 flex flex-col items-center gap-2" style={{ borderColor: "#DAD5C8", background: "#fff" }}><Upload size={22} color="#9B9689" /><span className="text-[12px]" style={{ color: "#9B9689" }}>แตะเพื่อแนบไฟล์ (จำลอง)</span></button>
+            <p className="text-[12px] mb-3" style={{ color: "#8B8578" }}>แนบเอกสารประกอบ (ถ้ามี)</p>
+            <button onClick={() => setForm({ ...form, file: form.file ? null : "เอกสารแนบ.pdf" })} className="w-full border-2 border-dashed rounded-2xl py-8 flex flex-col items-center gap-2" style={{ borderColor: "#DAD5C8", background: "#fff" }}><Upload size={22} color="#9B9689" /><span className="text-[12px]" style={{ color: "#9B9689" }}>แตะเพื่อแนบไฟล์ (จำลอง)</span></button>
             {form.file && (<div className="mt-3 flex items-center gap-2 bg-white rounded-xl p-3"><FileText size={16} color={NAVY} /><span className="text-[12.5px] flex-1" style={{ color: NAVY }}>{form.file}</span><button onClick={() => setForm({ ...form, file: null })}><X size={15} color="#B9B4A8" /></button></div>)}
           </div>
         )}
@@ -477,4 +493,4 @@ export default function App() {
       </div>
     </div>
   );
-}
+                  }

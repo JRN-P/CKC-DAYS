@@ -7,6 +7,17 @@ import {
 } from "lucide-react";
 import { db } from "../lib/db";
 
+const MAIN_BALANCE_TYPES = ["sick", "personal", "vacation", "study"];
+
+function computeDays(startDate, endDate, duration) {
+  if (!startDate) return 0;
+  const start = new Date(startDate);
+  const end = endDate ? new Date(endDate) : start;
+  const diffDays = Math.round((end - start) / 86400000) + 1;
+  if (diffDays <= 1 && duration && duration !== "full") return 0.5;
+  return diffDays;
+}
+
 const NAVY = "#152142";
 const CREAM = "#F7F3EC";
 const GOLD = "#C79A4B";
@@ -37,6 +48,7 @@ function reqFromRow(r) {
     id: r.id, employeeId: r.employee_id, approverId: r.approver_id, typeId: r.leave_type,
     label: typeMeta(r.leave_type).label,
     date: r.end_date && r.end_date !== r.start_date ? `${r.start_date} – ${r.end_date}` : r.start_date,
+    startDateRaw: r.start_date, endDateRaw: r.end_date,
     duration: r.duration || "full",
     reason: r.reason, returnDate: r.return_date, file: r.file_url, status: r.status,
     createdAt: new Date(r.created_at).getTime(),
@@ -112,13 +124,18 @@ function PickUserScreen({ employees, onPick, onSettings }) {
   );
 }
 
-function HomeScreen({ me, employees, requests, onOpenRecord, onNewLeave, onSwitchUser, onSettings }) {
+function HomeScreen({ me, employees, requests, balances: balanceRows, onOpenRecord, onNewLeave, onSwitchUser, onSettings }) {
   const myRequests = requests.filter((r) => r.employeeId === me.id).sort((a, b) => b.createdAt - a.createdAt);
   const pendingForMe = requests.filter((r) => r.status === "pending" && (r.approverId === me.id || (me.role === "admin" && !r.approverId))).sort((a, b) => b.createdAt - a.createdAt);
-  const balances = [
-    { label: "ลาพักร้อน", value: 15, icon: Calendar }, { label: "ลากิจ", value: 5, icon: Briefcase },
-    { label: "ลาป่วย", value: 8, icon: Heart }, { label: "วันหยุดสะสม", value: 12, icon: Umbrella },
-  ];
+  const balanceIcon = { sick: Heart, personal: Briefcase, vacation: Umbrella, study: Calendar };
+  const balances = MAIN_BALANCE_TYPES.map((typeId) => {
+    const allocated = (balanceRows.find((b) => b.employee_id === me.id && b.leave_type === typeId) || {}).allocated;
+    const used = requests
+      .filter((r) => r.employeeId === me.id && r.typeId === typeId && r.status === "approved")
+      .reduce((sum, r) => sum + computeDays(r.startDateRaw, r.endDateRaw, r.duration), 0);
+    const remaining = allocated != null ? Math.max(0, allocated - used) : null;
+    return { label: typeMeta(typeId).label, value: remaining === null ? "-" : remaining, icon: balanceIcon[typeId] };
+  });
   return (
     <div className="h-full flex flex-col" style={{ background: CREAM }}>
       <div className="flex items-center justify-between px-5 pt-4 shrink-0">
@@ -134,7 +151,7 @@ function HomeScreen({ me, employees, requests, onOpenRecord, onNewLeave, onSwitc
           <RoleBadge role={me.role} />
         </div>
         <div className="mt-4 rounded-2xl p-4" style={{ background: NAVY }}>
-          <span className="text-[12px] text-white/80">ยอดคงเหลือวันนี้ (ตัวอย่าง)</span>
+          <span className="text-[12px] text-white/80">ยอดคงเหลือวันนี้</span>
           <div className="grid grid-cols-4 gap-2 mt-3">
             {balances.map((b) => (<div key={b.label} className="flex flex-col items-center gap-1.5"><b.icon size={16} color={GOLD} /><span className="text-[10px] text-white/70 text-center leading-tight">{b.label}</span><span className="text-white text-base font-semibold">{b.value}</span><span className="text-[9px] text-white/50 -mt-1">วัน</span></div>))}
           </div>
@@ -221,8 +238,7 @@ function NewLeaveFlow({ me, employees, onCancel, onSubmit }) {
         )}
         {step === 3 && (
           <div className="px-5">
-            <p className="text-[12px] mb-3" style={{ color: "#8B8578" }}>แนบเอกสารประกอบ (ถ้ามี)</p>
-            <button onClick={() => setForm({ ...form, file: form.file ? null : "เอกสารแนบ.pdf" })} className="w-full border-2 border-dashed rounded-2xl py-8 flex flex-col items-center gap-2" style={{ borderColor: "#DAD5C8", background: "#fff" }}><Upload size={22} color="#9B9689" /><span className="text-[12px]" style={{ color: "#9B9689" }}>แตะเพื่อแนบไฟล์ (จำลอง)</span></button>
+            <p className="text-[12px] mb-3" style={{ color: "#8B8578" }}>แนบเอกสารประกอบ (ถ้ามี)</p>            <button onClick={() => setForm({ ...form, file: form.file ? null : "เอกสารแนบ.pdf" })} className="w-full border-2 border-dashed rounded-2xl py-8 flex flex-col items-center gap-2" style={{ borderColor: "#DAD5C8", background: "#fff" }}><Upload size={22} color="#9B9689" /><span className="text-[12px]" style={{ color: "#9B9689" }}>แตะเพื่อแนบไฟล์ (จำลอง)</span></button>
             {form.file && (<div className="mt-3 flex items-center gap-2 bg-white rounded-xl p-3"><FileText size={16} color={NAVY} /><span className="text-[12.5px] flex-1" style={{ color: NAVY }}>{form.file}</span><button onClick={() => setForm({ ...form, file: null })}><X size={15} color="#B9B4A8" /></button></div>)}
           </div>
         )}
@@ -271,6 +287,7 @@ function DetailScreen({ record, employees, me, onBack, onDecision }) {
   const meta = typeMeta(record.typeId); const Icon = meta.icon;
   const emp = employees.find((e) => e.id === record.employeeId);
   const canDecide = record.status === "pending" && (record.approverId === me.id || (me.role === "admin" && !record.approverId));
+  const canCancel = record.status === "approved" && (record.approverId === me.id || me.role === "admin");
   return (
     <div className="h-full flex flex-col" style={{ background: CREAM }}>
       <TopBar onBack={onBack} />
@@ -302,11 +319,45 @@ function DetailScreen({ record, employees, me, onBack, onDecision }) {
           <button onClick={() => onDecision(record, "approved")} className="flex-1 py-3 rounded-2xl text-white text-[13px] font-medium flex items-center justify-center gap-1.5" style={{ background: "#3F9E68" }}><CheckCircle2 size={15} /> อนุมัติ</button>
         </div>
       )}
+      {canCancel && (
+        <div className="px-5 pb-5 pt-2 shrink-0">
+          <button onClick={() => onDecision(record, "pending", true)} className="w-full py-3 rounded-2xl text-[13px] font-medium border" style={{ color: "#D98C3A", borderColor: "#F0D9B0" }}>ยกเลิกการอนุมัติ (กลับเป็นรออนุมัติ)</button>
+        </div>
+      )}
     </div>
   );
 }
 
-function SettingsScreen({ employees, onBack, onAdd, onUpdate, onRemove }) {
+function BalanceEditor({ employee, balances, onSaveBalance }) {
+  const [open, setOpen] = useState(false);
+  const [vals, setVals] = useState(() => {
+    const init = {};
+    MAIN_BALANCE_TYPES.forEach((t) => {
+      const row = balances.find((b) => b.employee_id === employee.id && b.leave_type === t);
+      init[t] = row ? String(row.allocated) : "";
+    });
+    return init;
+  });
+  return (
+    <div className="mt-2 border-t border-[#F0EDE5] pt-2">
+      <button onClick={() => setOpen(!open)} className="text-[11.5px] font-medium" style={{ color: "#4C7FC7" }}>{open ? "ซ่อนสิทธิ์วันลา" : "ตั้งค่าสิทธิ์วันลา"}</button>
+      {open && (
+        <div className="mt-2 space-y-1.5">
+          {MAIN_BALANCE_TYPES.map((t) => (
+            <div key={t} className="flex items-center gap-2">
+              <span className="text-[11.5px] flex-1" style={{ color: "#8B8578" }}>{typeMeta(t).label}</span>
+              <input type="number" min="0" className="w-16 text-[12px] bg-[#F7F3EC] rounded-lg px-2 py-1.5 text-center" style={{ color: NAVY }}
+                value={vals[t]} onChange={(e) => setVals({ ...vals, [t]: e.target.value })} />
+              <button onClick={() => onSaveBalance(employee.id, t, Number(vals[t]) || 0)} className="text-[11px] px-2 py-1.5 rounded-lg text-white" style={{ background: NAVY }}>บันทึก</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SettingsScreen({ employees, balances, onBack, onAdd, onUpdate, onRemove, onSaveBalance }) {
   const [form, setForm] = useState({ name: "", role: "employee", managerId: "" });
   const inputCls = "w-full bg-white rounded-xl px-3.5 py-3 text-[13px] outline-none border border-[#EDEAE2]";
   const possibleManagers = employees.filter((e) => e.role === "manager" || e.role === "admin");
@@ -326,6 +377,7 @@ function SettingsScreen({ employees, onBack, onAdd, onUpdate, onRemove }) {
                 {employees.filter((m) => m.id !== e.id && (m.role === "manager" || m.role === "admin")).map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
               </select>
             </div>
+            <BalanceEditor employee={e} balances={balances} onSaveBalance={onSaveBalance} />
           </div>
         ))}
         <div className="bg-white rounded-2xl p-3.5 mt-4">
@@ -346,13 +398,20 @@ export default function App() {
   const [screen, setScreen] = useState("loading");
   const [employees, setEmployees] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [balances, setBalances] = useState([]);
   const [meId, setMeId] = useState(null);
   const [activeRecord, setActiveRecord] = useState(null);
 
   async function reload() {
-    const [emps, reqs] = await Promise.all([db.getEmployees(), db.getRequests()]);
+    const [emps, reqs, bals] = await Promise.all([db.getEmployees(), db.getRequests(), db.getBalances()]);
     setEmployees((emps || []).map(empFromRow));
     setRequests((reqs || []).map(reqFromRow));
+    setBalances(bals || []);
+  }
+
+  async function handleSaveBalance(employeeId, leaveType, allocated) {
+    await db.upsertBalance({ employee_id: employeeId, leave_type: leaveType, allocated });
+    await reload();
   }
 
   useEffect(() => {
@@ -366,8 +425,10 @@ export default function App() {
         emps = await db.getEmployees();
       }
       const reqs = await db.getRequests();
+      const bals = await db.getBalances();
       setEmployees(emps.map(empFromRow));
       setRequests((reqs || []).map(reqFromRow));
+      setBalances(bals || []);
       const saved = typeof window !== "undefined" ? localStorage.getItem("days_me") : null;
       if (saved && emps.find((e) => e.id === saved)) { setMeId(saved); setScreen("home"); } else { setScreen("pickUser"); }
     })();
@@ -389,9 +450,10 @@ export default function App() {
     setScreen("success");
   }
 
-  async function handleDecision(record, decision) {
+  async function handleDecision(record, decision, isCancel) {
     await db.updateRequest(record.id, { status: decision });
-    await db.addHistory({ request_id: record.id, note: decision === "approved" ? "ผู้อนุมัติได้อนุมัติคำขอ" : "ผู้อนุมัติไม่อนุมัติคำขอ" });
+    const note = isCancel ? "ผู้อนุมัติยกเลิกการอนุมัติ กลับเป็นรออนุมัติ" : decision === "approved" ? "ผู้อนุมัติได้อนุมัติคำขอ" : "ผู้อนุมัติไม่อนุมัติคำขอ";
+    await db.addHistory({ request_id: record.id, note });
     await reload();
     setScreen("home");
   }
@@ -407,11 +469,11 @@ export default function App() {
       <div className="flex-1 overflow-hidden flex flex-col relative">
         {screen === "loading" && <Loading />}
         {screen === "pickUser" && <PickUserScreen employees={employees} onPick={pickUser} onSettings={() => setScreen("settings")} />}
-        {screen === "home" && me && <HomeScreen me={me} employees={employees} requests={requests} onOpenRecord={(r) => { setActiveRecord(r); setScreen("detail"); }} onNewLeave={() => setScreen("new")} onSwitchUser={() => setScreen("pickUser")} onSettings={() => setScreen("settings")} />}
+        {screen === "home" && me && <HomeScreen me={me} employees={employees} requests={requests} balances={balances} onOpenRecord={(r) => { setActiveRecord(r); setScreen("detail"); }} onNewLeave={() => setScreen("new")} onSwitchUser={() => setScreen("pickUser")} onSettings={() => setScreen("settings")} />}
         {screen === "new" && me && <NewLeaveFlow me={me} employees={employees} onCancel={() => setScreen("home")} onSubmit={handleSubmitLeave} />}
         {screen === "success" && <SuccessScreen onDone={() => setScreen("home")} />}
         {screen === "detail" && activeRecord && me && <DetailScreen record={activeRecord} employees={employees} me={me} onBack={() => setScreen("home")} onDecision={handleDecision} />}
-        {screen === "settings" && <SettingsScreen employees={employees} onBack={() => setScreen(meId ? "home" : "pickUser")} onAdd={handleAddEmployee} onUpdate={handleUpdateEmployee} onRemove={handleRemoveEmployee} />}
+        {screen === "settings" && <SettingsScreen employees={employees} balances={balances} onBack={() => setScreen(meId ? "home" : "pickUser")} onAdd={handleAddEmployee} onUpdate={handleUpdateEmployee} onRemove={handleRemoveEmployee} onSaveBalance={handleSaveBalance} />}
       </div>
     </div>
   );

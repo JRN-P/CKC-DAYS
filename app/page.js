@@ -127,7 +127,7 @@ function PickUserScreen({ employees, onPick, onSettings }) {
 function HomeScreen({ me, employees, requests, balances: balanceRows, onOpenRecord, onNewLeave, onSwitchUser, onSettings }) {
   const myRequests = requests.filter((r) => r.employeeId === me.id).sort((a, b) => b.createdAt - a.createdAt);
   const pendingForMe = requests.filter((r) => r.status === "pending" && (r.approverId === me.id || (me.role === "admin" && !r.approverId))).sort((a, b) => b.createdAt - a.createdAt);
-  const teamRequests = requests.filter((r) => r.approverId === me.id && r.employeeId !== me.id).sort((a, b) => b.createdAt - a.createdAt);
+  const teamRequests = requests.filter((r) => r.employeeId !== me.id && (r.approverId === me.id || (me.role === "admin" && !r.approverId))).sort((a, b) => b.createdAt - a.createdAt);
   const balanceIcon = { sick: Heart, personal: Briefcase, vacation: Umbrella, study: Calendar };
   const balances = MAIN_BALANCE_TYPES.map((typeId) => {
     const allocated = (balanceRows.find((b) => b.employee_id === me.id && b.leave_type === typeId) || {}).allocated;
@@ -493,4 +493,4 @@ export default function App() {
       </div>
     </div>
   );
-                  }
+                }

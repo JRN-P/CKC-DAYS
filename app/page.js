@@ -4,6 +4,7 @@ import {
   ChevronLeft, ChevronRight, Calendar, Heart, Clock, Umbrella,
   Plus, Briefcase, Baby, BookOpen, MoreHorizontal, Paperclip, FileText,
   CheckCircle2, XCircle, X, Upload, Users, Shield, RefreshCw, Trash2, User,
+  AlertTriangle, Search, BarChart3,
 } from "lucide-react";
 import { db } from "../lib/db";
 
@@ -16,6 +17,27 @@ function computeDays(startDate, endDate, duration) {
   const diffDays = Math.round((end - start) / 86400000) + 1;
   if (diffDays <= 1 && duration && duration !== "full") return 0.5;
   return diffDays;
+}
+
+function dateRange(startDate, endDate) {
+  const out = [];
+  if (!startDate) return out;
+  const start = new Date(startDate);
+  const end = endDate ? new Date(endDate) : start;
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+  const s1 = aStart, e1 = aEnd || aStart, s2 = bStart, e2 = bEnd || bStart;
+  return s1 <= e2 && s2 <= e1;
+}
+
+function isCurrentYear(dateStr) {
+  if (!dateStr) return false;
+  return new Date(dateStr).getFullYear() === new Date().getFullYear();
 }
 
 const NAVY = "#152142";
@@ -99,14 +121,22 @@ function Loading() {
 }
 
 function PickUserScreen({ employees, onPick, onSettings }) {
+  const [q, setQ] = useState("");
+  const filtered = employees.filter((e) => e.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="h-full flex flex-col" style={{ background: CREAM }}>
       <div className="px-6 pt-10 pb-6 text-center shrink-0">
-        <div className="text-2xl tracking-[0.3em] font-light" style={{ color: NAVY }}>DAYS</div>
+        <img src="/logo.png" alt="DAYS" className="h-9 mx-auto object-contain" />
         <p className="text-[12px] mt-3" style={{ color: "#9B9689" }}>เลือกว่าตอนนี้คุณกำลังใช้งานในฐานะใคร</p>
       </div>
+      <div className="px-5 pb-3 shrink-0">
+        <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2.5">
+          <Search size={15} color="#9B9689" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อพนักงาน" className="flex-1 text-[13px] outline-none" style={{ color: NAVY }} />
+        </div>
+      </div>
       <div className="flex-1 overflow-y-auto px-5 space-y-2.5">
-        {employees.map((e) => (
+        {filtered.map((e) => (
           <button key={e.id} onClick={() => onPick(e.id)} className="w-full flex items-center gap-3 bg-white rounded-2xl p-3.5 text-left">
             <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0" style={{ background: ROLE_BG[e.role] }}><User size={18} color={ROLE_FG[e.role]} /></div>
             <div className="flex-1 min-w-0">
@@ -124,15 +154,17 @@ function PickUserScreen({ employees, onPick, onSettings }) {
   );
 }
 
-function HomeScreen({ me, employees, requests, balances: balanceRows, onOpenRecord, onNewLeave, onSwitchUser, onSettings }) {
+function HomeScreen({ me, employees, requests, balances: balanceRows, onOpenRecord, onNewLeave, onSwitchUser, onSettings, onReport }) {
+  const [teamFilter, setTeamFilter] = useState("all");
   const myRequests = requests.filter((r) => r.employeeId === me.id).sort((a, b) => b.createdAt - a.createdAt);
   const pendingForMe = requests.filter((r) => r.status === "pending" && (r.approverId === me.id || (me.role === "admin" && !r.approverId))).sort((a, b) => b.createdAt - a.createdAt);
-  const teamRequests = requests.filter((r) => r.employeeId !== me.id && (r.approverId === me.id || (me.role === "admin" && !r.approverId))).sort((a, b) => b.createdAt - a.createdAt);
+  const teamRequestsAll = requests.filter((r) => r.employeeId !== me.id && (r.approverId === me.id || (me.role === "admin" && !r.approverId))).sort((a, b) => b.createdAt - a.createdAt);
+  const teamRequests = teamFilter === "all" ? teamRequestsAll : teamRequestsAll.filter((r) => r.status === teamFilter);
   const balanceIcon = { sick: Heart, personal: Briefcase, vacation: Umbrella, study: Calendar };
   const balances = MAIN_BALANCE_TYPES.map((typeId) => {
     const allocated = (balanceRows.find((b) => b.employee_id === me.id && b.leave_type === typeId) || {}).allocated;
     const used = requests
-      .filter((r) => r.employeeId === me.id && r.typeId === typeId && r.status === "approved")
+      .filter((r) => r.employeeId === me.id && r.typeId === typeId && r.status === "approved" && isCurrentYear(r.startDateRaw))
       .reduce((sum, r) => sum + computeDays(r.startDateRaw, r.endDateRaw, r.duration), 0);
     const remaining = allocated != null ? Math.max(0, allocated - used) : null;
     return { label: typeMeta(typeId).label, value: remaining === null ? "-" : remaining, icon: balanceIcon[typeId] };
@@ -140,8 +172,9 @@ function HomeScreen({ me, employees, requests, balances: balanceRows, onOpenReco
   return (
     <div className="h-full flex flex-col" style={{ background: CREAM }}>
       <div className="flex items-center justify-between px-5 pt-4 shrink-0">
-        <div className="text-xl tracking-[0.3em] font-light" style={{ color: NAVY }}>DAYS</div>
+        <img src="/logo.png" alt="DAYS" className="h-8 object-contain" />
         <div className="flex items-center gap-2">
+          {me.role === "admin" && <button onClick={onReport} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "#fff" }}><BarChart3 size={16} color={NAVY} /></button>}
           {me.role === "admin" && <button onClick={onSettings} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "#fff" }}><Shield size={16} color={NAVY} /></button>}
           <button onClick={onSwitchUser} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "#fff" }}><Users size={16} color={NAVY} /></button>
         </div>
@@ -182,11 +215,16 @@ function HomeScreen({ me, employees, requests, balances: balanceRows, onOpenReco
           })}
         </div>
 
-        {teamRequests.length > 0 && (
+        {teamRequestsAll.length > 0 && (
           <div className="pb-3">
             <div className="flex items-center justify-between pt-2 pb-2"><span className="text-[13px] font-semibold" style={{ color: NAVY }}>รายการทีมงาน</span></div>
+            <div className="flex gap-1.5 pb-2.5 overflow-x-auto">
+              {[["all", "ทั้งหมด"], ["pending", "รออนุมัติ"], ["approved", "อนุมัติแล้ว"], ["rejected", "ไม่อนุมัติ"]].map(([id, label]) => (
+                <button key={id} onClick={() => setTeamFilter(id)} className="text-[11px] px-3 py-1.5 rounded-full font-medium shrink-0" style={{ background: teamFilter === id ? NAVY : "#EDEAE2", color: teamFilter === id ? "#fff" : "#8B8578" }}>{label}</button>
+              ))}
+            </div>
             <div className="space-y-2.5">
-              {teamRequests.map((r) => {
+              {teamRequests.length === 0 && <p className="text-[12px] text-center py-4" style={{ color: "#B9B4A8" }}>ไม่มีรายการในหมวดนี้</p>}              {teamRequests.map((r) => {
                 const emp = employees.find((e) => e.id === r.employeeId); const meta = typeMeta(r.typeId); const Icon = meta.icon;
                 return (<button key={r.id} onClick={() => onOpenRecord(r)} className="w-full flex items-center gap-3 bg-white rounded-2xl p-3 text-left">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: meta.bg }}><Icon size={18} color={meta.fg} /></div>
@@ -204,20 +242,29 @@ function HomeScreen({ me, employees, requests, balances: balanceRows, onOpenReco
 
 function Field({ label, children }) { return <div><label className="text-[12px] font-medium block mb-1.5" style={{ color: "#8B8578" }}>{label}</label>{children}</div>; }
 
-function NewLeaveFlow({ me, employees, onCancel, onSubmit }) {
+function NewLeaveFlow({ me, employees, requests, holidays, onCancel, onSubmit, editRecord }) {
   const [step, setStep] = useState(1);
-  const [typeId, setTypeId] = useState(null);
-  const [form, setForm] = useState({ startDate: "", endDate: "", returnDate: "", reason: "", file: null, duration: "full" });
+  const [typeId, setTypeId] = useState(editRecord ? editRecord.typeId : null);
+  const [form, setForm] = useState(
+    editRecord
+      ? { startDate: editRecord.startDateRaw || "", endDate: editRecord.endDateRaw || "", returnDate: editRecord.returnDate === "-" ? "" : editRecord.returnDate, reason: editRecord.reason === "-" ? "" : editRecord.reason, file: editRecord.file, duration: editRecord.duration }
+      : { startDate: "", endDate: "", returnDate: "", reason: "", file: null, duration: "full" }
+  );
   const meta = typeId ? typeMeta(typeId) : null;
   const approver = employees.find((e) => e.id === me.managerId);
   const approverName = approver ? `${approver.name} (${ROLE_LABEL[approver.role]})` : "ไม่มีผู้อนุมัติ — ส่งตรงถึงแอดมิน";
-  const canNext = step === 1 ? !!typeId : step === 2 ? !!form.startDate && !!form.reason : true;
   const inputCls = "w-full bg-white rounded-xl px-3.5 py-3 text-[13px] outline-none border border-transparent focus:border-[#15214255]";
   const isSingleDay = !form.endDate || form.endDate === form.startDate;
 
+  const overlapping = form.startDate
+    ? (requests || []).find((r) => r.employeeId === me.id && r.id !== (editRecord && editRecord.id) && r.status !== "rejected" && rangesOverlap(form.startDate, form.endDate || form.startDate, r.startDateRaw, r.endDateRaw))
+    : null;
+  const holidaysInRange = form.startDate ? dateRange(form.startDate, form.endDate || form.startDate).map((d) => (holidays || []).find((h) => h.date === d)).filter(Boolean) : [];
+  const canNext = step === 1 ? !!typeId : step === 2 ? !!form.startDate && !!form.reason && !overlapping : true;
+
   return (
     <div className="h-full flex flex-col" style={{ background: CREAM }}>
-      <TopBar title="บันทึกการลา" onBack={onCancel} />
+      <TopBar title={editRecord ? "แก้ไขคำขอลา" : "บันทึกการลา"} onBack={onCancel} />
       <StepDots step={step} />
       <div className="flex-1 overflow-y-auto pb-3">
         {step === 1 && (
@@ -235,6 +282,18 @@ function NewLeaveFlow({ me, employees, onCancel, onSubmit }) {
             <div className="text-[12px] px-3 py-2 rounded-xl" style={{ background: "#FCEBD5", color: "#D98C3A" }}>กำลังบันทึก: {meta?.label} • ผู้อนุมัติ: {approverName}</div>
             <Field label="วันที่ลา"><input type="date" className={inputCls} style={{ color: NAVY }} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></Field>
             <Field label="ถึงวันที่ (ถ้าลาวันเดียว ปล่อยว่างหรือใส่วันเดียวกัน)"><input type="date" className={inputCls} style={{ color: NAVY }} value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} /></Field>
+            {overlapping && (
+              <div className="text-[12px] px-3 py-2 rounded-xl flex items-start gap-2" style={{ background: "#FDE3E3", color: "#E0605B" }}>
+                <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                <span>วันที่นี้ทับกับ &quot;{overlapping.label}&quot; ({overlapping.date}) ที่ยื่นไว้แล้ว กรุณาเลือกวันอื่นหรือยกเลิกรายการเดิมก่อน</span>
+              </div>
+            )}
+            {!overlapping && holidaysInRange.length > 0 && (
+              <div className="text-[12px] px-3 py-2 rounded-xl flex items-start gap-2" style={{ background: "#DCEAFB", color: "#4C7FC7" }}>
+                <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                <span>ช่วงนี้มีวันหยุดบริษัท: {holidaysInRange.map((h) => `${h.name} (${h.date})`).join(", ")}</span>
+              </div>
+            )}
             {isSingleDay && (
               <Field label="ระยะเวลา">
                 <div className="flex gap-2">
@@ -247,7 +306,8 @@ function NewLeaveFlow({ me, employees, onCancel, onSubmit }) {
                   ))}
                 </div>
               </Field>
-            )}            <Field label="วันที่คาดว่าจะกลับมาทำงาน"><input type="date" className={inputCls} style={{ color: NAVY }} value={form.returnDate} onChange={(e) => setForm({ ...form, returnDate: e.target.value })} /></Field>
+            )}
+            <Field label="วันที่คาดว่าจะกลับมาทำงาน"><input type="date" className={inputCls} style={{ color: NAVY }} value={form.returnDate} onChange={(e) => setForm({ ...form, returnDate: e.target.value })} /></Field>
             <Field label="เหตุผล"><textarea rows={3} className={inputCls + " resize-none"} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></Field>
           </div>
         )}
@@ -278,7 +338,7 @@ function NewLeaveFlow({ me, employees, onCancel, onSubmit }) {
       </div>
       <div className="px-5 pb-5 pt-2 flex gap-3 shrink-0">
         {step > 1 && <button onClick={() => setStep(step - 1)} className="flex-1 py-3 rounded-2xl text-[13px] font-medium border" style={{ color: NAVY, borderColor: "#DAD5C8" }}>ย้อนกลับ</button>}
-        <button disabled={!canNext} onClick={() => (step < 4 ? setStep(step + 1) : onSubmit({ typeId, ...form, duration: isSingleDay ? form.duration : "full", approverId: approver ? approver.id : null }))} className="flex-1 py-3 rounded-2xl text-[13px] font-medium text-white" style={{ background: canNext ? NAVY : "#C9C4B8" }}>{step < 4 ? "ถัดไป" : "ยืนยันการบันทึก"}</button>
+        <button disabled={!canNext} onClick={() => (step < 4 ? setStep(step + 1) : onSubmit({ typeId, ...form, duration: isSingleDay ? form.duration : "full", approverId: approver ? approver.id : null, editId: editRecord ? editRecord.id : null }))} className="flex-1 py-3 rounded-2xl text-[13px] font-medium text-white" style={{ background: canNext ? NAVY : "#C9C4B8" }}>{step < 4 ? "ถัดไป" : editRecord ? "บันทึกการแก้ไข" : "ยืนยันการบันทึก"}</button>
       </div>
     </div>
   );
@@ -297,13 +357,15 @@ function Row({ icon: Icon, label, value }) {
   return (<div className="flex items-center gap-3 px-4 py-3.5"><Icon size={15} color="#9B9689" /><span className="text-[12px] flex-1" style={{ color: "#9B9689" }}>{label}</span><span className="text-[12px] font-medium text-right max-w-[55%]" style={{ color: NAVY }}>{value}</span></div>);
 }
 
-function DetailScreen({ record, employees, me, onBack, onDecision }) {
+function DetailScreen({ record, employees, me, onBack, onDecision, onWithdraw, onEdit }) {
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const [history, setHistory] = useState([]);
   useEffect(() => { db.getHistory(record.id).then((rows) => setHistory(rows || [])); }, [record.id]);
   const meta = typeMeta(record.typeId); const Icon = meta.icon;
   const emp = employees.find((e) => e.id === record.employeeId);
   const canDecide = record.status === "pending" && (record.approverId === me.id || (me.role === "admin" && !record.approverId));
   const canCancel = record.status === "approved" && (record.approverId === me.id || me.role === "admin");
+  const isOwnPending = record.status === "pending" && record.employeeId === me.id;
   return (
     <div className="h-full flex flex-col" style={{ background: CREAM }}>
       <TopBar onBack={onBack} />
@@ -340,6 +402,16 @@ function DetailScreen({ record, employees, me, onBack, onDecision }) {
           <button onClick={() => onDecision(record, "pending", true)} className="w-full py-3 rounded-2xl text-[13px] font-medium border" style={{ color: "#D98C3A", borderColor: "#F0D9B0" }}>ยกเลิกการอนุมัติ (กลับเป็นรออนุมัติ)</button>
         </div>
       )}
+      {isOwnPending && (
+        <div className="px-5 pb-5 pt-2 flex gap-3 shrink-0">
+          <button onClick={() => onEdit(record)} className="flex-1 py-3 rounded-2xl text-[13px] font-medium border" style={{ color: NAVY, borderColor: "#DAD5C8" }}>แก้ไขคำขอ</button>
+          {!confirmWithdraw ? (
+            <button onClick={() => setConfirmWithdraw(true)} className="flex-1 py-3 rounded-2xl text-[13px] font-medium border" style={{ color: "#E0605B", borderColor: "#F3C6C4" }}>ยกเลิกคำขอ</button>
+          ) : (
+            <button onClick={() => onWithdraw(record)} className="flex-1 py-3 rounded-2xl text-white text-[13px] font-medium" style={{ background: "#E0605B" }}>ยืนยันยกเลิก?</button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -373,17 +445,32 @@ function BalanceEditor({ employee, balances, onSaveBalance }) {
   );
 }
 
-function SettingsScreen({ employees, balances, onBack, onAdd, onUpdate, onRemove, onSaveBalance }) {
+function SettingsScreen({ employees, balances, holidays, onBack, onAdd, onUpdate, onRemove, onSaveBalance, onResetAll, onAddHoliday, onRemoveHoliday }) {
   const [form, setForm] = useState({ name: "", role: "employee", managerId: "" });
-  const inputCls = "w-full bg-white rounded-xl px-3.5 py-3 text-[13px] outline-none border border-[#EDEAE2]";
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [empQuery, setEmpQuery] = useState("");
+  const [holidayForm, setHolidayForm] = useState({ date: "", name: "" });  const inputCls = "w-full bg-white rounded-xl px-3.5 py-3 text-[13px] outline-none border border-[#EDEAE2]";
   const possibleManagers = employees.filter((e) => e.role === "manager" || e.role === "admin");
+  const filteredEmployees = employees.filter((e) => e.name.toLowerCase().includes(empQuery.toLowerCase()));
   return (
     <div className="h-full flex flex-col" style={{ background: CREAM }}>
       <TopBar title="จัดการพนักงาน / สายอนุมัติ" onBack={onBack} />
       <div className="flex-1 overflow-y-auto px-5 pb-5 space-y-2.5">
-        {employees.map((e) => (
+        <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2.5 mb-1">
+          <Search size={15} color="#9B9689" />
+          <input value={empQuery} onChange={(e) => setEmpQuery(e.target.value)} placeholder="ค้นหาชื่อพนักงาน" className="flex-1 text-[13px] outline-none" style={{ color: NAVY }} />
+        </div>
+        {filteredEmployees.map((e) => (
           <div key={e.id} className="bg-white rounded-2xl p-3.5">
-            <div className="flex items-center justify-between mb-2"><span className="text-[13px] font-medium" style={{ color: NAVY }}>{e.name}</span><button onClick={() => onRemove(e.id)}><Trash2 size={15} color="#C9C4B8" /></button></div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[13px] font-medium" style={{ color: NAVY }}>{e.name}</span>
+              {confirmDeleteId === e.id ? (
+                <button onClick={() => { onRemove(e.id); setConfirmDeleteId(null); }} className="text-[11px] px-2 py-1 rounded-lg text-white" style={{ background: "#E0605B" }}>ยืนยันลบ?</button>
+              ) : (
+                <button onClick={() => setConfirmDeleteId(e.id)}><Trash2 size={15} color="#C9C4B8" /></button>
+              )}
+            </div>
             <div className="flex gap-2">
               <select value={e.role} onChange={(ev) => onUpdate(e.id, { role: ev.target.value })} className="flex-1 text-[12px] bg-[#F7F3EC] rounded-lg px-2 py-2" style={{ color: NAVY }}>
                 <option value="employee">พนักงาน</option><option value="manager">หัวหน้างาน</option><option value="admin">ผู้ดูแลระบบ</option>
@@ -405,6 +492,68 @@ function SettingsScreen({ employees, balances, onBack, onAdd, onUpdate, onRemove
             <button onClick={() => { if (!form.name.trim()) return; onAdd({ name: form.name.trim(), role: form.role, manager_id: form.managerId || null }); setForm({ name: "", role: "employee", managerId: "" }); }} className="w-full py-2.5 rounded-xl text-white text-[12.5px] font-medium" style={{ background: NAVY }}>+ เพิ่มพนักงาน</button>
           </div>
         </div>
+
+        <div className="bg-white rounded-2xl p-3.5 mt-4">
+          <span className="text-[13px] font-semibold block mb-2" style={{ color: NAVY }}>วันหยุดบริษัท / นักขัตฤกษ์</span>
+          <div className="space-y-1.5 mb-2">
+            {(holidays || []).length === 0 && <p className="text-[11px]" style={{ color: "#B9B4A8" }}>ยังไม่มีวันหยุดที่ตั้งไว้</p>}
+            {(holidays || []).map((h) => (
+              <div key={h.id} className="flex items-center justify-between bg-[#F7F3EC] rounded-lg px-3 py-2">
+                <span className="text-[12px]" style={{ color: NAVY }}>{h.date} — {h.name}</span>
+                <button onClick={() => onRemoveHoliday(h.id)}><Trash2 size={13} color="#C9C4B8" /></button>
+              </div>
+            ))}
+          </div>
+          <div className="space-y-2">
+            <input type="date" className={inputCls} style={{ color: NAVY }} value={holidayForm.date} onChange={(e) => setHolidayForm({ ...holidayForm, date: e.target.value })} />
+            <input placeholder="ชื่อวันหยุด เช่น วันสงกรานต์" className={inputCls} style={{ color: NAVY }} value={holidayForm.name} onChange={(e) => setHolidayForm({ ...holidayForm, name: e.target.value })} />
+            <button onClick={() => { if (!holidayForm.date || !holidayForm.name.trim()) return; onAddHoliday({ date: holidayForm.date, name: holidayForm.name.trim() }); setHolidayForm({ date: "", name: "" }); }} className="w-full py-2.5 rounded-xl text-white text-[12.5px] font-medium" style={{ background: NAVY }}>+ เพิ่มวันหยุด</button>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-3.5 mt-4 border" style={{ borderColor: "#F3C6C4" }}>
+          <span className="text-[13px] font-semibold block mb-1" style={{ color: "#E0605B" }}>โซนอันตราย</span>
+          <p className="text-[11px] mb-2" style={{ color: "#9B9689" }}>ล้างคำขอลา / ประวัติ / สิทธิ์วันลาทั้งหมด (ไม่ลบรายชื่อพนักงาน) ใช้เพื่อเริ่มทดสอบใหม่</p>
+          {!confirmReset ? (
+            <button onClick={() => setConfirmReset(true)} className="w-full py-2.5 rounded-xl text-[12.5px] font-medium border" style={{ color: "#E0605B", borderColor: "#F3C6C4" }}>รีเซ็ตข้อมูลการลาทั้งหมด</button>
+          ) : (
+            <button onClick={() => { onResetAll(); setConfirmReset(false); }} className="w-full py-2.5 rounded-xl text-[12.5px] font-medium text-white" style={{ background: "#E0605B" }}>ยืนยันการรีเซ็ต (ข้อมูลจะหายถาวร)</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReportScreen({ employees, requests, onBack }) {
+  const rows = employees.map((emp) => {
+    const perType = MAIN_BALANCE_TYPES.map((typeId) => {
+      const used = requests
+        .filter((r) => r.employeeId === emp.id && r.typeId === typeId && r.status === "approved" && isCurrentYear(r.startDateRaw))
+        .reduce((sum, r) => sum + computeDays(r.startDateRaw, r.endDateRaw, r.duration), 0);
+      return { typeId, used };
+    });
+    const total = perType.reduce((s, p) => s + p.used, 0);
+    return { emp, perType, total };
+  }).sort((a, b) => b.total - a.total);
+  return (
+    <div className="h-full flex flex-col" style={{ background: CREAM }}>
+      <TopBar title={`สรุปวันลารวม (ปี ${new Date().getFullYear() + 543})`} onBack={onBack} />
+      <div className="flex-1 overflow-y-auto px-5 pb-5 space-y-2.5">
+        {rows.map(({ emp, perType, total }) => (
+          <div key={emp.id} className="bg-white rounded-2xl p-3.5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[13px] font-medium" style={{ color: NAVY }}>{emp.name}</span>
+              <span className="text-[13px] font-semibold" style={{ color: NAVY }}>{total} วัน</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {perType.filter((p) => p.used > 0).map((p) => (
+                <span key={p.typeId} className="text-[10.5px] px-2 py-1 rounded-full" style={{ background: "#F7F3EC", color: "#8B8578" }}>{typeMeta(p.typeId).label} {p.used}</span>
+              ))}
+              {perType.every((p) => p.used === 0) && <span className="text-[11px]" style={{ color: "#B9B4A8" }}>ยังไม่มีวันลาที่อนุมัติในปีนี้</span>}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -415,20 +564,26 @@ export default function App() {
   const [employees, setEmployees] = useState([]);
   const [requests, setRequests] = useState([]);
   const [balances, setBalances] = useState([]);
+  const [holidays, setHolidays] = useState([]);
   const [meId, setMeId] = useState(null);
   const [activeRecord, setActiveRecord] = useState(null);
+  const [editingRecord, setEditingRecord] = useState(null);
 
   async function reload() {
-    const [emps, reqs, bals] = await Promise.all([db.getEmployees(), db.getRequests(), db.getBalances()]);
+    const [emps, reqs, bals, hols] = await Promise.all([db.getEmployees(), db.getRequests(), db.getBalances(), db.getHolidays()]);
     setEmployees((emps || []).map(empFromRow));
     setRequests((reqs || []).map(reqFromRow));
     setBalances(bals || []);
+    setHolidays(hols || []);
   }
 
   async function handleSaveBalance(employeeId, leaveType, allocated) {
     await db.upsertBalance({ employee_id: employeeId, leave_type: leaveType, allocated });
     await reload();
   }
+
+  async function handleAddHoliday(h) { await db.addHoliday(h); await reload(); }
+  async function handleRemoveHoliday(id) { await db.deleteHoliday(id); await reload(); }
 
   useEffect(() => {
     (async () => {
@@ -442,9 +597,11 @@ export default function App() {
       }
       const reqs = await db.getRequests();
       const bals = await db.getBalances();
+      const hols = await db.getHolidays();
       setEmployees(emps.map(empFromRow));
       setRequests((reqs || []).map(reqFromRow));
       setBalances(bals || []);
+      setHolidays(hols || []);
       const saved = typeof window !== "undefined" ? localStorage.getItem("days_me") : null;
       if (saved && emps.find((e) => e.id === saved)) { setMeId(saved); setScreen("home"); } else { setScreen("pickUser"); }
     })();
@@ -453,6 +610,17 @@ export default function App() {
   function pickUser(id) { setMeId(id); localStorage.setItem("days_me", id); setScreen("home"); }
 
   async function handleSubmitLeave(data) {
+    if (data.editId) {
+      await db.updateRequest(data.editId, {
+        leave_type: data.typeId, start_date: data.startDate, end_date: data.endDate || data.startDate,
+        return_date: data.returnDate, duration: data.duration || "full", reason: data.reason, file_url: data.file,
+      });
+      await db.addHistory({ request_id: data.editId, note: "ผู้ยื่นแก้ไขคำขอลา" });
+      await reload();
+      setEditingRecord(null);
+      setScreen("home");
+      return;
+    }
     await db.addRequest({
       employee_id: meId, approver_id: data.approverId, leave_type: data.typeId,
       start_date: data.startDate, end_date: data.endDate || data.startDate, return_date: data.returnDate,
@@ -464,6 +632,18 @@ export default function App() {
     await db.addHistory({ request_id: newest.id, note: "ผู้ยื่นได้ทำการบันทึกคำขอลา" });
     await reload();
     setScreen("success");
+  }
+
+  async function handleWithdraw(record) {
+    await db.deleteRequest(record.id);
+    await reload();
+    setScreen("home");
+  }
+
+  async function handleResetAll() {
+    await db.resetLeaveData();
+    await reload();
+    setScreen("settings");
   }
 
   async function handleDecision(record, decision, isCancel) {
@@ -485,11 +665,12 @@ export default function App() {
       <div className="flex-1 overflow-hidden flex flex-col relative">
         {screen === "loading" && <Loading />}
         {screen === "pickUser" && <PickUserScreen employees={employees} onPick={pickUser} onSettings={() => setScreen("settings")} />}
-        {screen === "home" && me && <HomeScreen me={me} employees={employees} requests={requests} balances={balances} onOpenRecord={(r) => { setActiveRecord(r); setScreen("detail"); }} onNewLeave={() => setScreen("new")} onSwitchUser={() => setScreen("pickUser")} onSettings={() => setScreen("settings")} />}
-        {screen === "new" && me && <NewLeaveFlow me={me} employees={employees} onCancel={() => setScreen("home")} onSubmit={handleSubmitLeave} />}
+        {screen === "home" && me && <HomeScreen me={me} employees={employees} requests={requests} balances={balances} onOpenRecord={(r) => { setActiveRecord(r); setScreen("detail"); }} onNewLeave={() => setScreen("new")} onSwitchUser={() => setScreen("pickUser")} onSettings={() => setScreen("settings")} onReport={() => setScreen("report")} />}
+        {screen === "new" && me && <NewLeaveFlow me={me} employees={employees} requests={requests} holidays={holidays} editRecord={editingRecord} onCancel={() => { setEditingRecord(null); setScreen(editingRecord ? "detail" : "home"); }} onSubmit={handleSubmitLeave} />}
         {screen === "success" && <SuccessScreen onDone={() => setScreen("home")} />}
-        {screen === "detail" && activeRecord && me && <DetailScreen record={activeRecord} employees={employees} me={me} onBack={() => setScreen("home")} onDecision={handleDecision} />}
-        {screen === "settings" && <SettingsScreen employees={employees} balances={balances} onBack={() => setScreen(meId ? "home" : "pickUser")} onAdd={handleAddEmployee} onUpdate={handleUpdateEmployee} onRemove={handleRemoveEmployee} onSaveBalance={handleSaveBalance} />}
+        {screen === "detail" && activeRecord && me && <DetailScreen record={activeRecord} employees={employees} me={me} onBack={() => setScreen("home")} onDecision={handleDecision} onWithdraw={handleWithdraw} onEdit={(r) => { setEditingRecord(r); setScreen("new"); }} />}
+        {screen === "settings" && <SettingsScreen employees={employees} balances={balances} holidays={holidays} onBack={() => setScreen(meId ? "home" : "pickUser")} onAdd={handleAddEmployee} onUpdate={handleUpdateEmployee} onRemove={handleRemoveEmployee} onSaveBalance={handleSaveBalance} onResetAll={handleResetAll} onAddHoliday={handleAddHoliday} onRemoveHoliday={handleRemoveHoliday} />}
+        {screen === "report" && me && <ReportScreen employees={employees} requests={requests} onBack={() => setScreen("home")} />}
       </div>
     </div>
   );
